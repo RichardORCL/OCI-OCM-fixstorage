@@ -41,10 +41,19 @@ Easiest way to run this script is from the OCI Cloud Shell:
 ```
 git clone https://github.com/RichardORCL/OCI-OCM-fixstorage.git
 cd OCI-OCM-fixstorage
-python ocm-fixstorage.py -c [compartmentOCID]
+python ocm-fixstorage.py -c [compartmentOCID or (partial) name of compartment]
 ```
 
 Specify in the example above, in which compartment you want to check the compute instances.
+
+
+Fixing any mismatches, use the -fix option
+```
+python ocm-fixstorage.py -c [compartmentOCID or (partial) name of compartment] -fix
+```
+
+
+
 
 ### Alternative way to run script
 

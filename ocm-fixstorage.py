@@ -1,7 +1,7 @@
 import sys
 import time
 import oci
-from ocimodules.functions import login, input_command_line, create_signer, check_oci_version, MyWriter, GetHomeRegion, GetTenantName, SubscribedRegions, GetFullCompartments, GetCompartmentFullPath
+from ocimodules.functions import login, input_command_line, create_signer, check_oci_version, MyWriter, GetHomeRegion, GetTenantName, SubscribedRegions, GetFullCompartments, GetCompartmentFullPath, findCompartment
 
 # Disable OCI CircuitBreaker feature
 oci.circuit_breaker.NoCircuitBreakerStrategy()
@@ -38,26 +38,20 @@ print("Tenant Name: {}".format(tenant_name))
 if cmd.region:
     config['region'] = cmd.region
 
+
+#################################################
+# Check specified compartment
+######################################################
+compartment_id = findCompartment(config, signer, cmd.compartment)
+if compartment_id == 0:
+    print("Compartment not found")
+    sys.exit(1)
+
 #################################################
 # Resolve compartment
 #################################################
 compartments = GetFullCompartments(config, signer)
-compartment_id = None
-compartment_path = None
-
-for comp in compartments:
-    if cmd.compartment in (comp.details.id, comp.details.name, comp.fullpath):
-        compartment_id = comp.details.id
-        compartment_path = comp.fullpath
-        break
-    if comp.fullpath.endswith("/{}".format(cmd.compartment)):
-        compartment_id = comp.details.id
-        compartment_path = comp.fullpath
-        break
-
-if compartment_id is None:
-    compartment_id = cmd.compartment
-    compartment_path = GetCompartmentFullPath(compartments, compartment_id) or compartment_id
+compartment_path = GetCompartmentFullPath(compartments, compartment_id) or compartment_id
 
 print("Compartment: {}".format(compartment_path))
 

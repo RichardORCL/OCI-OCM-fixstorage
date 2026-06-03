@@ -1,6 +1,7 @@
 import argparse
 import oci
 import os
+import re
 import sys
 import time
 
@@ -21,7 +22,7 @@ def input_command_line(help=False):
     parser.add_argument('-dt', action='store_true', default=False, dest='is_delegation_token', help='Use Delegation Token for Authentication')
     parser.add_argument("-log", nargs='?', const='log.txt', default="", dest='log_file', help="Output also to logfile. If logfile not specified, will log to log.txt")
     parser.add_argument("-rg", default="", dest='region', help="Select Region")
-    parser.add_argument("-c", required=True, dest='compartment', help="Select Compartment")
+    parser.add_argument("-c", required=True, dest='compartment', help="Select Compartment by specified OCID or (partial) name")
     parser.add_argument("-fix", action='store_true', default=False, dest='fix', help="Rename and move only mismatched attached volumes to the instance compartment")
     cmd = parser.parse_args()
 
@@ -296,6 +297,105 @@ def GetCompartmentFullPath(compartments, ocid):
             return getattr(compartment, "fullpath", None)
     return None
 
+
+#################################################
+## Find compartment by OCID or display name
+#################################################
+def _confirm_compartment_match(specified, display_name, ocid):
+    if display_name == specified:
+        return True
+
+    print("Found compartment: {} ({})".format(display_name, ocid))
+    while True:
+        answer = input("Use this compartment? (y/n): ").strip().lower()
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("Please enter y or n.")
+
+
+def findCompartment(config, signer, compartment):
+    """
+    Resolve a compartment OCID from an OCID or display name.
+
+    If compartment starts with ocid1., verify it exists via the Identity API.
+    Otherwise search compartments by display name using OCI Resource Search.
+    Returns the compartment OCID, or 0 if not found.
+    """
+    if not compartment:
+        return 0
+
+    identity = oci.identity.IdentityClient(config, signer=signer)
+
+    if compartment.startswith("ocid1."):
+        retry = True
+        while retry:
+            retry = False
+            try:
+                identity.get_compartment(compartment_id=compartment).data
+                return compartment
+            except oci.exceptions.ServiceError as e:
+                if e.status == 404:
+                    return 0
+                if e.status == 429:
+                    print("API busy.. retry", end="\r")
+                    retry = True
+                    time.sleep(WaitRefresh)
+                else:
+                    print("bad error!: " + e.message)
+                    return 0
+        return 0
+
+    escaped_name = re.escape(compartment).replace('"', '\\"')
+    query = 'query compartment resources where displayName =~ "{}"'.format(escaped_name)
+    search_client = oci.resource_search.ResourceSearchClient(config, signer=signer)
+    search_details = oci.resource_search.models.StructuredSearchDetails(
+        query=query,
+        type="Structured",
+    )
+
+    retry = True
+    matches = []
+    while retry:
+        retry = False
+        try:
+            matches = oci.pagination.list_call_get_all_results(
+                search_client.search_resources,
+                search_details,
+                retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
+            ).data
+        except oci.exceptions.ServiceError as e:
+            if e.status == 429:
+                print("API busy.. retry", end="\r")
+                retry = True
+                time.sleep(WaitRefresh)
+            else:
+                print("bad error!: " + e.message)
+                return 0
+
+    if not matches:
+        return 0
+
+    if len(matches) == 1:
+        match = matches[0]
+        if _confirm_compartment_match(compartment, match.display_name, match.identifier):
+            return match.identifier
+        return 0
+
+    print("Multiple compartments found:")
+    for index, match in enumerate(matches, start=1):
+        print("  {}. {} ({})".format(index, match.display_name, match.identifier))
+
+    while True:
+        try:
+            selection = input("Select compartment number: ").strip()
+            choice = int(selection)
+            if 1 <= choice <= len(matches):
+                return matches[choice - 1].identifier
+        except ValueError:
+            pass
+        print("Invalid selection. Enter a number between 1 and {}.".format(len(matches)))
 
 
 ##########################################################################
